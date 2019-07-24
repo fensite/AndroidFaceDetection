@@ -8,7 +8,7 @@ import android.view.Surface;
 public class TraceHelper {
     static {
         System.loadLibrary("trace_native");
-        System.loadLibrary("opencv");
+        System.loadLibrary("opencv_java3");
     }
 
     public static native void loadModel(String detectModel);

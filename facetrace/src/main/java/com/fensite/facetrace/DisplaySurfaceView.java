@@ -70,6 +70,8 @@ public class DisplaySurfaceView extends SurfaceView implements SurfaceHolder.Cal
     private ImageReader mImageReader;
     private CameraCaptureSession mCameraCaptureSession;
 
+    private StreamConfigurationMap map;
+
 
     private Point maxPreviewSize;
     private Point minPreviewSize;
@@ -86,7 +88,6 @@ public class DisplaySurfaceView extends SurfaceView implements SurfaceHolder.Cal
      * A {@link Handler} for running tasks in the background.
      */
     private Handler mBackgroundHandler;
-
 
     private ImageReader.OnImageAvailableListener mOnImageAvailableListener = new ImageReader.OnImageAvailableListener() {
         @Override
@@ -108,13 +109,56 @@ public class DisplaySurfaceView extends SurfaceView implements SurfaceHolder.Cal
     private CameraDevice.StateCallback mStateCallback = new CameraDevice.StateCallback() {
         @Override
         public void onOpened(@NonNull CameraDevice camera) {
+            Log.d(TAG,"onOpened");
             mCameraDevice = camera;
             if (null == mCameraDevice)
                 return;
 
             try {
-                CaptureRequest.Builder builder = mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
-                builder.addTarget(mImageReader.getSurface());
+                final CaptureRequest.Builder builder = mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
+
+                builder.addTarget(getHolder().getSurface());
+                builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH);     // 闪光灯
+                builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);// 自动对焦
+
+                // For still image captures, we use the largest available size.
+                Size largest = Collections.max(
+                        Arrays.asList(map.getOutputSizes(ImageFormat.JPEG)),
+                        new CompareSizesByArea());
+                Log.d(TAG,"Collections.max");
+                mImageReader = ImageReader.newInstance(largest.getWidth(), largest.getHeight(),
+                        ImageFormat.JPEG, /*maxImages*/2);
+                Log.d(TAG,"ImageReader.newInstance");
+                mImageReader.setOnImageAvailableListener(
+                        mOnImageAvailableListener, mBackgroundHandler);
+
+                Log.d(TAG,"setSurface");
+                TraceHelper.setSurface(getHolder().getSurface(), largest.getWidth(), largest.getHeight());
+
+                mCameraDevice.createCaptureSession(Arrays.asList(getHolder().getSurface(), mImageReader.getSurface()),
+                        new CameraCaptureSession.StateCallback() {
+                            @Override
+                            public void onConfigured(@NonNull CameraCaptureSession session) {
+                                Log.i(TAG, "set ok");
+                                // The camera is already closed
+                                if (null == mCameraDevice) {
+                                    return;
+                                }
+                                mCameraCaptureSession = session;
+                                try {
+                                    mCameraCaptureSession.setRepeatingRequest(builder.build(), mCaptureCallback, mBackgroundHandler);
+
+                                } catch (CameraAccessException e) {
+                                    e.printStackTrace();
+                                }
+                            }
+
+                            @Override
+                            public void onConfigureFailed(@NonNull CameraCaptureSession session) {
+                                Log.i(TAG, "开启预览会话失败!");
+                            }
+                        }, null);
+
             } catch (CameraAccessException e) {
                 e.printStackTrace();
             }
@@ -161,12 +205,13 @@ public class DisplaySurfaceView extends SurfaceView implements SurfaceHolder.Cal
 
     @Override
     public void surfaceChanged(SurfaceHolder surfaceHolder, int i, int i1, int i2) {
-
+        stopPreview();
+        startPreview();
     }
 
     @Override
     public void surfaceDestroyed(SurfaceHolder surfaceHolder) {
-
+        stopPreview();
     }
 
     /**
@@ -176,7 +221,7 @@ public class DisplaySurfaceView extends SurfaceView implements SurfaceHolder.Cal
         try {
             for (String cameraId : mCameraManager.getCameraIdList()) {
                 CameraCharacteristics characteristics = mCameraManager.getCameraCharacteristics(cameraId);
-                StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+                map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
 //                Size maxSize = getMaxSize(map.getOutputSizes(SurfaceHolder.class));
                 if (currentCameraId == CameraCharacteristics.LENS_FACING_BACK && characteristics.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT) {
                     //前置转后置
@@ -200,24 +245,36 @@ public class DisplaySurfaceView extends SurfaceView implements SurfaceHolder.Cal
     }
 
     private void startPreview() {
+        Log.d(TAG,"startPreview");
+        startBackgroundThread();
+
         try {
             //获取摄像头管理
-            CameraManager cameraManager = (CameraManager) getContext().getSystemService(Context.CAMERA_SERVICE);
-            String[] cameraIdList = cameraManager.getCameraIdList();//获取可用相机列表
+            mCameraManager = (CameraManager) getContext().getSystemService(Context.CAMERA_SERVICE);
+            String[] cameraIdList = mCameraManager.getCameraIdList();//获取可用相机列表
             Log.e("trace", "可用相机的个数是:" + cameraIdList.length);
             if (cameraIdList.length <= 0) {
                 Log.e(TAG, "无可用相机");
                 return;
             }
-            String cameraId = cameraIdList[0];
-            CameraCharacteristics cameraCharacteristics = cameraManager.getCameraCharacteristics(cameraId);//获取某个相机(摄像头特性)
+
+            for (int i=0; i<cameraIdList.length; ++i)
+            {
+                if (currentCameraId == Integer.parseInt(cameraIdList[i])) {
+                    mCameraId = cameraIdList[i];
+                    break;
+                }
+            }
+            mCameraId = cameraIdList[1];
+            CameraCharacteristics cameraCharacteristics = mCameraManager.getCameraCharacteristics(mCameraId);//获取某个相机(摄像头特性)
             int supportLevel = cameraCharacteristics.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL);//检查支持
             if (supportLevel == CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LEGACY) {
                 Log.w(TAG, "硬件不支持新特性");
             }
 
-            StreamConfigurationMap map = cameraCharacteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+            map = cameraCharacteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
             if (map == null) {
+                Log.e(TAG,"StreamConfigurationMap is null");
                 return;
             }
             mPreviewSize = getBestSupportedSize(new ArrayList<Size>(Arrays.asList(map.getOutputSizes(SurfaceTexture.class))));
@@ -225,8 +282,6 @@ public class DisplaySurfaceView extends SurfaceView implements SurfaceHolder.Cal
                     ImageFormat.YUV_420_888, 2);
             mImageReader.setOnImageAvailableListener(
                     new OnImageAvailableListenerImpl(), null);
-
-
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 if (getContext().checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
@@ -237,66 +292,28 @@ public class DisplaySurfaceView extends SurfaceView implements SurfaceHolder.Cal
                     //                                          int[] grantResults)
                     // to handle the case where the user grants the permission. See the documentation
                     // for Activity#requestPermissions for more details.
-                    return;
+                    Log.e(TAG,"checkSelfPermission(Manifest.permission.CAMERA error");
+//                    return;
                 }
             }
 
-            cameraManager.openCamera(mCameraId, mStateCallback, null);
-            final CaptureRequest.Builder builder = mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
-            builder.addTarget(getHolder().getSurface());
-            builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH);     // 闪光灯
-            builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);// 自动对焦
-
-            // For still image captures, we use the largest available size.
-            Size largest = Collections.max(
-                    Arrays.asList(map.getOutputSizes(ImageFormat.JPEG)),
-                    new CompareSizesByArea());
-            mImageReader = ImageReader.newInstance(largest.getWidth(), largest.getHeight(),
-                    ImageFormat.JPEG, /*maxImages*/2);
-            mImageReader.setOnImageAvailableListener(
-                    mOnImageAvailableListener, mBackgroundHandler);
-
-            mCameraDevice.createCaptureSession(Arrays.asList(getHolder().getSurface(), mImageReader.getSurface()),
-                    new CameraCaptureSession.StateCallback() {
-                @Override
-                public void onConfigured(@NonNull CameraCaptureSession session) {
-                    Log.i(TAG, "set ok");
-                    // The camera is already closed
-                    if (null == mCameraDevice) {
-                        return;
-                    }
-                    mCameraCaptureSession = session;
-                    try {
-                        mCameraCaptureSession.setRepeatingRequest(builder.build(), mCaptureCallback, mBackgroundHandler);
-
-                    } catch (CameraAccessException e) {
-                        e.printStackTrace();
-                    }
-                }
-
-                @Override
-                public void onConfigureFailed(@NonNull CameraCaptureSession session) {
-                    Log.i(TAG, "开启预览会话失败!");
-                }
-            }, null);
-
+            mCameraManager.openCamera(mCameraId, mStateCallback, null);
+            Log.d(TAG,"openCamera");
         } catch (Exception e) {
             Log.e("trace", "Exception");
         }
-
-        mImageReader = ImageReader.newInstance(mPreviewSize.getWidth(), mPreviewSize.getHeight(),
-                ImageFormat.YUV_420_888, 2);
-
-
-
     }
 
     private void stopPreview() {
+        Log.d(TAG, "stopPreview");
         if (mCameraDevice != null) {
             mCameraDevice.close();
             mCameraDevice = null;
         }
 
+        stopBackgroundThread();
+
+        TraceHelper.stopTracking();
     }
 
 
@@ -305,6 +322,7 @@ public class DisplaySurfaceView extends SurfaceView implements SurfaceHolder.Cal
         public void onCaptureCompleted(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull TotalCaptureResult result) {
             super.onCaptureCompleted(session, request, result);
             Log.d(TAG,"onCaptureCompleted");
+//            captureStillPicture();
             result.get(CaptureResult.STATISTICS_FACE_DETECT_MODE);
         }
 
@@ -434,6 +452,8 @@ public class DisplaySurfaceView extends SurfaceView implements SurfaceHolder.Cal
      * Stops the background thread and its {@link Handler}.
      */
     private void stopBackgroundThread() {
+        if (null == mBackgroundThread)
+            return;
         mBackgroundThread.quitSafely();
         try {
             mBackgroundThread.join();
@@ -443,4 +463,44 @@ public class DisplaySurfaceView extends SurfaceView implements SurfaceHolder.Cal
             e.printStackTrace();
         }
     }
+
+    /**
+     * Capture a still picture. This method should be called when we get a response in
+     * {@link #mCaptureCallback} from both {@link #()}.
+     */
+    private void captureStillPicture() {
+        try {
+            if (null == mCameraDevice) {
+                return;
+            }
+            // This is the CaptureRequest.Builder that we use to take a picture.
+            final CaptureRequest.Builder captureBuilder =
+                    mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
+            captureBuilder.addTarget(mImageReader.getSurface());
+
+            // Use the same AE and AF modes as the preview.
+            captureBuilder.set(CaptureRequest.CONTROL_AF_MODE,
+                    CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
+
+
+            // Orientation
+
+            CameraCaptureSession.CaptureCallback CaptureCallback
+                    = new CameraCaptureSession.CaptureCallback() {
+
+                @Override
+                public void onCaptureCompleted(@NonNull CameraCaptureSession session,
+                                               @NonNull CaptureRequest request,
+                                               @NonNull TotalCaptureResult result) {
+                }
+            };
+
+            mCameraCaptureSession.stopRepeating();
+            mCameraCaptureSession.abortCaptures();
+            mCameraCaptureSession.capture(captureBuilder.build(), CaptureCallback, null);
+        } catch (CameraAccessException e) {
+            e.printStackTrace();
+        }
+    }
+
 }
