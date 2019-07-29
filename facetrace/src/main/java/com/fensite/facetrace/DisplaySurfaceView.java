@@ -22,6 +22,7 @@ import android.media.ImageReader;
 import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
+import android.text.TextUtils;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.util.Size;
@@ -62,15 +63,27 @@ public class DisplaySurfaceView extends SurfaceView implements SurfaceHolder.Cal
      */
     private static final int MAX_PREVIEW_HEIGHT = 1080;
 
+    /**
+     * 前置摄像头
+     */
+    private static final String CAMERA_FRONT = "0";
+
+    /**
+     * 后置摄像头
+     */
+    private static final String CAMERA_BACK = "1";
+
     private CameraManager mCameraManager;
     private CameraDevice mCameraDevice;
+    private CameraCharacteristics mCameraCharacteristics;
+
     private SurfaceTexture mSurfaceTexture = null;
     private String mCameraId;
-    private int currentCameraId;
+    private String currentCameraId = CAMERA_FRONT; //默认开启前置摄像头
     private ImageReader mImageReader;
     private CameraCaptureSession mCameraCaptureSession;
 
-    private StreamConfigurationMap map;
+    private StreamConfigurationMap mMap;
 
 
     private Point maxPreviewSize;
@@ -89,20 +102,25 @@ public class DisplaySurfaceView extends SurfaceView implements SurfaceHolder.Cal
      */
     private Handler mBackgroundHandler;
 
+    public void prepare() {
+
+    }
+
     private ImageReader.OnImageAvailableListener mOnImageAvailableListener = new ImageReader.OnImageAvailableListener() {
         @Override
         public void onImageAvailable(ImageReader reader) {
             Log.d(TAG, "onImageAvailable");
             int rotation = ((Activity) getContext()).getWindowManager().getDefaultDisplay()
                     .getRotation();
+            Log.d(TAG, "reader.getImageFormat:" + reader.getImageFormat());
             Image image = reader.acquireLatestImage();
+            Log.d(TAG,"image width:" + image.getWidth() + "  height:" + image.getHeight());
             //我们可以将这帧数据转成字节数组，类似于Camera1的PreviewCallback回调的预览帧数据
             ByteBuffer buffer = image.getPlanes()[0].getBuffer();
             byte[] data = new byte[buffer.remaining()];
-            TraceHelper.detectorFace(data, width, height, rotation, mCameraId);
             buffer.get(data);
+            TraceHelper.detectorFace(data, image.getWidth(), image.getHeight(), rotation, mCameraId);
             image.close();
-
         }
     };
 
@@ -117,23 +135,26 @@ public class DisplaySurfaceView extends SurfaceView implements SurfaceHolder.Cal
             try {
                 final CaptureRequest.Builder builder = mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
 
-                builder.addTarget(getHolder().getSurface());
-                builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH);     // 闪光灯
-                builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);// 自动对焦
+//                mPreviewSize = getOptimalSize(mMap.getOutputSizes(SurfaceTexture.class),width,height);
+//                mPreviewSize = getBestSupportedSize(new ArrayList<Size>(Arrays.asList(mMap.getOutputSizes(SurfaceTexture.class))));
 
                 // For still image captures, we use the largest available size.
                 Size largest = Collections.max(
-                        Arrays.asList(map.getOutputSizes(ImageFormat.JPEG)),
+                        Arrays.asList(mMap.getOutputSizes(ImageFormat.YUV_420_888)),
                         new CompareSizesByArea());
                 Log.d(TAG,"Collections.max");
-                mImageReader = ImageReader.newInstance(largest.getWidth(), largest.getHeight(),
-                        ImageFormat.JPEG, /*maxImages*/2);
+                mImageReader = ImageReader.newInstance(640, 480,
+                        0x1, /*maxImages*/2);
                 Log.d(TAG,"ImageReader.newInstance");
-                mImageReader.setOnImageAvailableListener(
-                        mOnImageAvailableListener, mBackgroundHandler);
+                mImageReader.setOnImageAvailableListener(mOnImageAvailableListener, mBackgroundHandler);
+
+                builder.addTarget(getHolder().getSurface());
+                builder.addTarget(mImageReader.getSurface());
+                builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH);     // 闪光灯
+                builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);// 自动对焦
 
                 Log.d(TAG,"setSurface");
-                TraceHelper.setSurface(getHolder().getSurface(), largest.getWidth(), largest.getHeight());
+                TraceHelper.setSurface(mImageReader.getSurface(), mImageReader.getWidth(), mImageReader.getHeight());
 
                 mCameraDevice.createCaptureSession(Arrays.asList(getHolder().getSurface(), mImageReader.getSurface()),
                         new CameraCaptureSession.StateCallback() {
@@ -218,29 +239,16 @@ public class DisplaySurfaceView extends SurfaceView implements SurfaceHolder.Cal
      * 切换摄像头
      */
     public void switchCamera() {
-        try {
-            for (String cameraId : mCameraManager.getCameraIdList()) {
-                CameraCharacteristics characteristics = mCameraManager.getCameraCharacteristics(cameraId);
-                map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
-//                Size maxSize = getMaxSize(map.getOutputSizes(SurfaceHolder.class));
-                if (currentCameraId == CameraCharacteristics.LENS_FACING_BACK && characteristics.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT) {
-                    //前置转后置
-//                    previewSize = maxSize;
-                    currentCameraId = CameraCharacteristics.LENS_FACING_FRONT;
-                    stopPreview();
-                    startPreview();
-                    break;
-                } else if (currentCameraId == CameraCharacteristics.LENS_FACING_FRONT && characteristics.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK) {
-                    //后置转前置
-//                    previewSize = maxSize;
-                    currentCameraId = CameraCharacteristics.LENS_FACING_BACK;
-                    stopPreview();
-                    startPreview();
-                    break;
-                }
-            }
-        } catch (CameraAccessException e) {
-            e.printStackTrace();
+        if (currentCameraId == CAMERA_FRONT) {
+            //前置转后置
+            currentCameraId = CAMERA_BACK;
+            stopPreview();
+            startPreview();
+        } else if (currentCameraId == CAMERA_BACK) {
+            //后置转前置
+            currentCameraId = CAMERA_FRONT;
+            stopPreview();
+            startPreview();
         }
     }
 
@@ -252,7 +260,8 @@ public class DisplaySurfaceView extends SurfaceView implements SurfaceHolder.Cal
             //获取摄像头管理
             mCameraManager = (CameraManager) getContext().getSystemService(Context.CAMERA_SERVICE);
             String[] cameraIdList = mCameraManager.getCameraIdList();//获取可用相机列表
-            Log.e("trace", "可用相机的个数是:" + cameraIdList.length);
+
+            Log.d("trace", "可用相机的个数是:" + cameraIdList.length);
             if (cameraIdList.length <= 0) {
                 Log.e(TAG, "无可用相机");
                 return;
@@ -260,28 +269,23 @@ public class DisplaySurfaceView extends SurfaceView implements SurfaceHolder.Cal
 
             for (int i=0; i<cameraIdList.length; ++i)
             {
-                if (currentCameraId == Integer.parseInt(cameraIdList[i])) {
-                    mCameraId = cameraIdList[i];
+                mCameraId = cameraIdList[i];
+                if (TextUtils.equals(mCameraId, currentCameraId)) {
                     break;
                 }
             }
-            mCameraId = cameraIdList[1];
-            CameraCharacteristics cameraCharacteristics = mCameraManager.getCameraCharacteristics(mCameraId);//获取某个相机(摄像头特性)
-            int supportLevel = cameraCharacteristics.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL);//检查支持
+
+            mCameraCharacteristics = mCameraManager.getCameraCharacteristics(mCameraId);//获取某个相机(摄像头特性)
+            int supportLevel = mCameraCharacteristics.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL);//检查支持
             if (supportLevel == CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LEGACY) {
                 Log.w(TAG, "硬件不支持新特性");
             }
 
-            map = cameraCharacteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
-            if (map == null) {
+            mMap = mCameraCharacteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+            if (mMap == null) {
                 Log.e(TAG,"StreamConfigurationMap is null");
                 return;
             }
-            mPreviewSize = getBestSupportedSize(new ArrayList<Size>(Arrays.asList(map.getOutputSizes(SurfaceTexture.class))));
-            mImageReader = ImageReader.newInstance(mPreviewSize.getWidth(), mPreviewSize.getHeight(),
-                    ImageFormat.YUV_420_888, 2);
-            mImageReader.setOnImageAvailableListener(
-                    new OnImageAvailableListenerImpl(), null);
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 if (getContext().checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
@@ -304,15 +308,24 @@ public class DisplaySurfaceView extends SurfaceView implements SurfaceHolder.Cal
         }
     }
 
-    private void stopPreview() {
+    public void stopPreview() {
         Log.d(TAG, "stopPreview");
         if (mCameraDevice != null) {
             mCameraDevice.close();
             mCameraDevice = null;
         }
 
-        stopBackgroundThread();
+        if (null != mCameraCaptureSession) {
+            mCameraCaptureSession.close();
+            mCameraCaptureSession = null;
+        }
 
+        if (null != mImageReader) {
+            mImageReader.close();
+            mImageReader = null;
+        }
+
+        stopBackgroundThread();
         TraceHelper.stopTracking();
     }
 

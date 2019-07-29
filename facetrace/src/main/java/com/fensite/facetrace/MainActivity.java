@@ -20,6 +20,7 @@ import android.os.Environment;
 import android.util.Log;
 import android.view.SurfaceView;
 import android.view.View;
+import android.view.WindowManager;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -40,14 +41,17 @@ public class MainActivity extends Activity {
         if (Build.VERSION.SDK_INT >= 21) {
             //第二个参数是需要申请的权限
             if (ContextCompat.checkSelfPermission(this,
-                    Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                    != PackageManager.PERMISSION_GRANTED ||
-                    ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
-                    != PackageManager.PERMISSION_GRANTED)
+                    Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED ||
+                    ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED ||
+                    ContextCompat.checkSelfPermission(this, Manifest.permission.MOUNT_UNMOUNT_FILESYSTEMS) != PackageManager.PERMISSION_GRANTED ||
+                    ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED)
             {
 
                 ActivityCompat.requestPermissions(this,
-                        new String[]{Manifest.permission.CAMERA, Manifest.permission.WRITE_EXTERNAL_STORAGE},
+                        new String[]{Manifest.permission.CAMERA,
+                                Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                                Manifest.permission.MOUNT_UNMOUNT_FILESYSTEMS,
+                                Manifest.permission.READ_EXTERNAL_STORAGE},
                         1);
                 Log.e("trace", "requestPermissions");
             }
@@ -56,13 +60,17 @@ public class MainActivity extends Activity {
         }
 
         mSurfaceView = (DisplaySurfaceView) findViewById(R.id.surfaceView);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        mSurfaceView.setVisibility(View.GONE);
+        mSurfaceView.setVisibility(View.VISIBLE);
 
         new AsyncTask<Void, Void, Void>() {
 
             @Override
             protected Void doInBackground(Void... params) {
                 try {
-                    File dir = new File(Environment.getExternalStorageDirectory(), "face");
+                    File dir = new File(getFilesDir(), "face");
+                    Log.d("trace", "path is : " + dir.getAbsolutePath());
                     File haar = copyAssetsFile("haarcascade_frontalface_alt.xml", dir);
                     TraceHelper.loadModel(haar.getAbsolutePath());
                     TraceHelper.startTracking();
@@ -138,5 +146,6 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         super.onDestroy();
         TraceHelper.destory();
+        mSurfaceView.stopPreview();
     }
 }

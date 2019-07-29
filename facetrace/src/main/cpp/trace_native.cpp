@@ -52,6 +52,7 @@ JNIEXPORT void JNICALL
 Java_com_fensite_facetrace_TraceHelper_loadModel(JNIEnv *env, jclass type, jstring detectModel_) {
     const char *detectModel = env->GetStringUTFChars(detectModel_, 0);
 
+    LOGI("loadModel");
     Ptr<CascadeDetectorAdapter> mainDetector = makePtr<CascadeDetectorAdapter>(
             makePtr<CascadeClassifier>(detectModel));
     Ptr<CascadeDetectorAdapter> trackingDetector = makePtr<CascadeDetectorAdapter>(
@@ -60,6 +61,10 @@ Java_com_fensite_facetrace_TraceHelper_loadModel(JNIEnv *env, jclass type, jstri
     tracker = new DetectionBasedTracker(mainDetector, trackingDetector, detectorParams);
     env->ReleaseStringUTFChars(detectModel_, detectModel);
     faceClassifier = new CascadeClassifier(detectModel);
+    if (faceClassifier == NULL) {
+        LOGI("faceClassifier is null");
+    }
+    LOGI("faceClassifier ok");
 }
 
 JNIEXPORT void JNICALL
@@ -98,6 +103,7 @@ Java_com_fensite_facetrace_TraceHelper_setSurface(JNIEnv *env, jclass type, jobj
 
 JNIEXPORT void JNICALL
 Java_com_fensite_facetrace_TraceHelper_stopTracking(JNIEnv *env, jclass type) {
+    LOGI("stopTracking");
     if (tracker && isTracking) {
         isTracking = 0;
         tracker->stop();
@@ -114,31 +120,32 @@ Java_com_fensite_facetrace_TraceHelper_detectorFace(JNIEnv *env, jclass type, jb
     jbyte *data = env->GetByteArrayElements(data_, NULL);
     //把摄像头数据放入opencv的mat
     Mat nv21Mat(h + h / 2, w, CV_8UC1, data);
-    Mat rgbMat;
-    //摄像头是nv21 转成bgr
-    cvtColor(nv21Mat, rgbMat, CV_YUV2BGR_NV21);
-    //需要逆时针旋转90度
-    if (rotation == 0) {
-        int angle;
-        //后置
-        if (cameraId == 0) {
-            angle = -90;
-        } else {
-            angle = 90;
-        }
-        //旋转
-        Mat matrix = getRotationMatrix2D(Point2f(w / 2, h / 2), angle, 1);
-        warpAffine(rgbMat, rgbMat, matrix, Size(w, h));
-        //旋转后宽高交换 会有黑边 截取
-//        Mat dst;
-        getRectSubPix(rgbMat, Size(h, h),
-                      Point2f(w / 2, h / 2), rgbMat);
-        //下面显示前会resize的
-    }
-    //////////////////////////////////////////////////////step2 数字图像处理/////////////////////////////////////////////////////////////
+    Mat rgbMat(h,w,CV_8UC3, data);
+//
+//    //摄像头是nv21 转成bgr
+//    cvtColor(nv21Mat, rgbMat, CV_YUV2BGR_NV21);
+//    //需要逆时针旋转90度
+//    if (rotation == 0) {
+//        int angle;
+//        //后置
+//        if (cameraId == 0) {
+//            angle = -90;
+//        } else {
+//            angle = 90;
+//        }
+//        //旋转
+//        Mat matrix = getRotationMatrix2D(Point2f(w / 2, h / 2), angle, 1);
+//        warpAffine(rgbMat, rgbMat, matrix, Size(w, h));
+//        //旋转后宽高交换 会有黑边 截取
+////        Mat dst;
+//        getRectSubPix(rgbMat, Size(h, h),
+//                      Point2f(w / 2, h / 2), rgbMat);
+//        //下面显示前会resize的
+//    }
+//    //////////////////////////////////////////////////////step2 数字图像处理/////////////////////////////////////////////////////////////
 
     Mat grayMat;
-    cvtColor(rgbMat, grayMat, CV_BGR2GRAY);
+    cvtColor(rgbMat, grayMat, CV_BGRA2GRAY);
     //直方图均衡化 增强对比效果
     equalizeHist(grayMat, grayMat);
     vector<Rect> faces;
@@ -146,11 +153,17 @@ Java_com_fensite_facetrace_TraceHelper_detectorFace(JNIEnv *env, jclass type, jb
 //    tracker->process(grayMat);
     //获得识别结果 人脸位置矩形
 //    tracker->getObjects(faces);
+    if (grayMat.empty()) {
+        LOGI("grayMat empty");
+        return;
+    }
+    LOGI("grayMat not empty");
     faceClassifier->detectMultiScale(grayMat, faces);
 
     for (int i = 0; i < faces.size(); ++i) {
         Rect face = faces[i];
         rectangle(rgbMat, face.tl(), face.br(), Scalar(0, 255, 255));
+        LOGI("faces.size:%d", faces.size());
     }
     //ANativeWindow直接画出图像
     if (!nativeWindow) {
