@@ -15,6 +15,6 @@ public class TraceHelper {
     public static native void startTracking();
     public static native void stopTracking();
     public static native void setSurface(Surface surface, int w, int h);
-    public static native void detectorFace(byte[] data, int width, int height, int rotation, String mCameraId);
+    public static native void detectorFace(byte[] data, int width, int height, int rotation, int mCameraId);
     public static native void destory();
 }

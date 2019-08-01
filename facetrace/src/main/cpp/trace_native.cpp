@@ -113,39 +113,42 @@ Java_com_fensite_facetrace_TraceHelper_stopTracking(JNIEnv *env, jclass type) {
 JNIEXPORT void JNICALL
 Java_com_fensite_facetrace_TraceHelper_detectorFace(JNIEnv *env, jclass type, jbyteArray data_,
                                                     jint w, jint h, jint rotation,
-                                                    jstring cameraId){
+                                                    jint cameraId){
 
     /////////////////////////////////////////step1 将摄像头的数据转变成Native可以识别数据////////////////////////////////
     //摄像头数据
     jbyte *data = env->GetByteArrayElements(data_, NULL);
     //把摄像头数据放入opencv的mat
-    Mat nv21Mat(h + h / 2, w, CV_8UC1, data);
-    Mat rgbMat(h,w,CV_8UC3, data);
+//    Mat nv21Mat(h + h / 2, w, CV_8UC1, data);
+    Mat rgbMat(h,w,CV_8UC4, data);
 //
 //    //摄像头是nv21 转成bgr
-//    cvtColor(nv21Mat, rgbMat, CV_YUV2BGR_NV21);
-//    //需要逆时针旋转90度
-//    if (rotation == 0) {
-//        int angle;
-//        //后置
-//        if (cameraId == 0) {
-//            angle = -90;
-//        } else {
-//            angle = 90;
-//        }
-//        //旋转
-//        Mat matrix = getRotationMatrix2D(Point2f(w / 2, h / 2), angle, 1);
-//        warpAffine(rgbMat, rgbMat, matrix, Size(w, h));
-//        //旋转后宽高交换 会有黑边 截取
-////        Mat dst;
-//        getRectSubPix(rgbMat, Size(h, h),
-//                      Point2f(w / 2, h / 2), rgbMat);
-//        //下面显示前会resize的
-//    }
+    cvtColor(rgbMat, rgbMat, CV_RGB2BGR);
+    //需要逆时针旋转90度
+    if (rotation == 0) {
+        LOGI("需要逆时针旋转90度");
+        int angle;
+        //后置
+        if (cameraId == 0) {
+            angle = -90;
+            LOGI("cameraId == 0");
+        } else {
+            angle = 90;
+            LOGI("angle = -90;");
+        }
+        //旋转
+        Mat matrix = getRotationMatrix2D(Point2f(w / 2, h / 2), angle, 1);
+        warpAffine(rgbMat, rgbMat, matrix, Size(w, h));
+        //旋转后宽高交换 会有黑边 截取
+//        Mat dst;
+        getRectSubPix(rgbMat, Size(h, h),
+                      Point2f(w / 2, h / 2), rgbMat);
+        //下面显示前会resize的
+    }
 //    //////////////////////////////////////////////////////step2 数字图像处理/////////////////////////////////////////////////////////////
 
     Mat grayMat;
-    cvtColor(rgbMat, grayMat, CV_BGRA2GRAY);
+    cvtColor(rgbMat, grayMat, CV_RGBA2GRAY);
     //直方图均衡化 增强对比效果
     equalizeHist(grayMat, grayMat);
     vector<Rect> faces;
@@ -157,7 +160,6 @@ Java_com_fensite_facetrace_TraceHelper_detectorFace(JNIEnv *env, jclass type, jb
         LOGI("grayMat empty");
         return;
     }
-    LOGI("grayMat not empty");
     faceClassifier->detectMultiScale(grayMat, faces);
 
     for (int i = 0; i < faces.size(); ++i) {
@@ -183,7 +185,7 @@ Java_com_fensite_facetrace_TraceHelper_detectorFace(JNIEnv *env, jclass type, jb
     ANativeWindow_unlockAndPost(nativeWindow);
 
     end:
-    nv21Mat.release();
+//    nv21Mat.release();
     rgbMat.release();
     grayMat.release();
     env->ReleaseByteArrayElements(data_, data, 0);

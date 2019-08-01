@@ -119,7 +119,7 @@ public class DisplaySurfaceView extends SurfaceView implements SurfaceHolder.Cal
             ByteBuffer buffer = image.getPlanes()[0].getBuffer();
             byte[] data = new byte[buffer.remaining()];
             buffer.get(data);
-            TraceHelper.detectorFace(data, image.getWidth(), image.getHeight(), rotation, mCameraId);
+            TraceHelper.detectorFace(data, image.getWidth(), image.getHeight(), rotation, Integer.parseInt(mCameraId));
             image.close();
         }
     };
@@ -148,15 +148,15 @@ public class DisplaySurfaceView extends SurfaceView implements SurfaceHolder.Cal
                 Log.d(TAG,"ImageReader.newInstance");
                 mImageReader.setOnImageAvailableListener(mOnImageAvailableListener, mBackgroundHandler);
 
-                builder.addTarget(getHolder().getSurface());
+//                builder.addTarget(getHolder().getSurface());
                 builder.addTarget(mImageReader.getSurface());
                 builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH);     // 闪光灯
                 builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);// 自动对焦
 
                 Log.d(TAG,"setSurface");
-                TraceHelper.setSurface(mImageReader.getSurface(), mImageReader.getWidth(), mImageReader.getHeight());
+                TraceHelper.setSurface(getHolder().getSurface(), mImageReader.getWidth(), mImageReader.getHeight());
 
-                mCameraDevice.createCaptureSession(Arrays.asList(getHolder().getSurface(), mImageReader.getSurface()),
+                mCameraDevice.createCaptureSession(Arrays.asList(mImageReader.getSurface()),
                         new CameraCaptureSession.StateCallback() {
                             @Override
                             public void onConfigured(@NonNull CameraCaptureSession session) {
@@ -242,11 +242,13 @@ public class DisplaySurfaceView extends SurfaceView implements SurfaceHolder.Cal
         if (currentCameraId == CAMERA_FRONT) {
             //前置转后置
             currentCameraId = CAMERA_BACK;
+            Log.d(TAG,"currentCameraId " + currentCameraId);
             stopPreview();
             startPreview();
         } else if (currentCameraId == CAMERA_BACK) {
             //后置转前置
             currentCameraId = CAMERA_FRONT;
+            Log.d(TAG,"currentCameraId " + currentCameraId);
             stopPreview();
             startPreview();
         }
